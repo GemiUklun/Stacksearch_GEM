@@ -6,6 +6,8 @@ import pandas as pd
 from presto import rfifind, sifting, psr_utils, psrfits, filterbank, parfile    #From PRESTO
 from multiprocessing.pool import ThreadPool
 import matplotlib.pyplot as plt
+from matplotlib import gridspec
+from itertools import cycle
 
 
 def update_inf_name(inffile):
@@ -360,7 +362,7 @@ def execute_and_log(command, work_dir, log_abspath, dict_envs={}, flag_append=0,
         log_file.close()
 
 
-def prepsubband(infile, out_dir, LOG_filename, segment_label, chunk_label, Nsamples, mask_file, list_DD_schemes, nchan, nsubbands=0, other_flags="", verbosity_level=0):
+def prepsubband(infile, out_dir, LOG_filename, segment_label, chunk_label, Nsamples, mask_file, list_DD_schemes, nchan, nsubbands=0, other_flags="", verbosity_level=0, n_cpu=None):
         infile_nameonly = os.path.basename(infile)
         infile_basename = os.path.splitext(infile_nameonly)[0]
         print("prepsubband:: infile_basename = ", infile_basename)
@@ -412,7 +414,7 @@ def prepsubband(infile, out_dir, LOG_filename, segment_label, chunk_label, Nsamp
                                         flag_numout = "-numout %d" % (Nsamples/downsamp_factor) 
 
                                 prepsubband_outfilename = "%s_%s_%s" % (infile_basename, segment_label, chunk_label)
-                                cmd_prepsubband = "prepsubband -ncpus 4 %s %s -o %s %s -lodm %s -dmstep %s -numdms %s -downsamp %s -nsub %s %s" % (other_flags, flag_numout, prepsubband_outfilename, string_mask, list_DD_schemes[i]['loDM'], list_DD_schemes[i]['dDM'], list_DD_schemes[i]['num_DMs'], list_DD_schemes[i]['downsamp'], nsubbands, infile)
+                                cmd_prepsubband = "prepsubband -ncpus %d %s %s -o %s %s -lodm %s -dmstep %s -numdms %s -downsamp %s -nsub %s %s" % (n_cpu,other_flags, flag_numout, prepsubband_outfilename, string_mask, list_DD_schemes[i]['loDM'], list_DD_schemes[i]['dDM'], list_DD_schemes[i]['num_DMs'], list_DD_schemes[i]['downsamp'], nsubbands, infile)
                                 if infile.endswith(".fits"):
                                        cmd_prepsubband = cmd_prepsubband + " -noscales -nooffsets"
                                 print("Running:")
@@ -483,6 +485,26 @@ def check_prepsubband_result_DMFOLD(work_dir, list_DD_schemes, datfile_basename,
                                         print("check_prepsubband_result: False")
                                 return False
                         work_dir = OLD_work_dir
+        if verbosity_level >= 1:
+                print("check_prepsubband_result: True")
+
+        return True
+
+def check_stacksearch_result(work_dir, DM_code, verbosity_level=1):
+
+        Out_code = DM_code + "STACK"
+         
+        if verbosity_level >= 1:
+                print("check_stacksearch_result:: name = ", Out_code)
+                print("check_stacksearch_result:: work_dir = ", work_dir)
+
+        if verbosity_level >= 1:
+                print("check_stacksearch_result:: Looking for: ", os.path.join(work_dir,Out_code))
+
+        if len(glob.glob(os.path.join(work_dir,Out_code))) == 0:
+                if verbosity_level >= 1:
+                        print("check_prepsubband_result: False")
+                return False
         if verbosity_level >= 1:
                 print("check_prepsubband_result: True")
 
@@ -606,20 +628,25 @@ def stacksearch(fftlist, out_dir, LOG_filename, verbosity_level=0, threshold=8, 
                 print("stacksearch:: list of ffts = ", fftlist)
                 print("stacksearch:: cmd_stacksearch = ", cmd_stacksearch)
 
-        if verbosity_level >= 1:
-                print("stacksearch:: making the file from scratch...")
-        dict_env = {}
-        execute_and_log(cmd_stacksearch, out_dir, log_abspath, dict_env, 0)
-        if verbosity_level >= 1:
-                print("done!", end=' ') ; sys.stdout.flush()
+        CHECK_RES = check_stacksearch_result(out_dir, DM_code, verbosity_level)
+        if CHECK_RES:
+               print("stacksearch result already present!")
+        else:
+                if verbosity_level >= 1:
+                        print("stacksearch:: making the file from scratch...")
+                dict_env = {}
+                execute_and_log(cmd_stacksearch, out_dir, log_abspath, dict_env, 0)
+                if verbosity_level >= 1:
+                        print("done!", end=' ') ; sys.stdout.flush()
     
 
-def stacksearch_results_individual(verbosity_level=0, nharms=16,known_pulsars = None, known_freq_low = None, known_freq_high = None, dir_dm = None, REF_fourier_bin = None):
+def stacksearch_results_individual(verbosity_level=0, nharms=16,known_pulsars = None, known_freq_low = None, known_freq_high = None, dir_dm = None, REF_fourier_bin = None, STACK_TH=None, BIN_FACTOR=None):
 
         if VERBOSITY:
                print()
                print("STACKSEARCH INDIVIDUAL SIFTING")
-        Results_file = glob.glob("*STACK*")[0]
+        Results_file = glob.glob("*STACK")[0]
+        print(Results_file)
         try:
                 # Read the results file, skipping commented lines
                 Results = np.loadtxt(Results_file, comments='#')
@@ -657,13 +684,13 @@ def stacksearch_results_individual(verbosity_level=0, nharms=16,known_pulsars = 
                         if is_known:
                                 Name_cands[cand_idx] = psrname
                                 Flag_cands[cand_idx] = 1
-                                Flag_cands, Name_cands = remove_harmonics(period_ms[cand_idx],period_ms,Flag_cands[cand_idx],Flag_cands,Name_cands,nharms,Curr_num,Curr_den,REF_fourier_bin,known_freq_low[known_idx],known_freq_high[known_idx],cand_idx) # Putting zeros in the correspondent harmonics
+                                Flag_cands, Name_cands = remove_harmonics(period_ms[cand_idx],period_ms,Flag_cands[cand_idx],Flag_cands,Name_cands,nharms,Curr_num,Curr_den,REF_fourier_bin,BIN_FACTOR,known_freq_low[known_idx],known_freq_high[known_idx],cand_idx) # Putting zeros in the correspondent harmonics
                         
                         else:
                                 Name_cands[cand_idx] = dir_dm + "_CAND_" + str(Counter_interesting)
                                 Flag_cands[cand_idx] = 2
                                 Counter_interesting = Counter_interesting + 1
-                                Flag_cands, Name_cands = remove_harmonics(period_ms[cand_idx],period_ms,Flag_cands[cand_idx],Flag_cands,Name_cands,nharms,Curr_num,Curr_den,REF_fourier_bin,known_freq_low[known_idx],known_freq_high[known_idx],cand_idx) # Putting zeros in the correspondent harmonics
+                                Flag_cands, Name_cands = remove_harmonics(period_ms[cand_idx],period_ms,Flag_cands[cand_idx],Flag_cands,Name_cands,nharms,Curr_num,Curr_den,REF_fourier_bin,BIN_FACTOR,-999,-999,cand_idx) # Putting zeros in the correspondent harmonics
 
 
         sigma = sigma[Flag_cands!=0]
@@ -685,6 +712,12 @@ def stacksearch_results_individual(verbosity_level=0, nharms=16,known_pulsars = 
                                    "Power":power,
                                    "N_harm":n_harm})
 
+        Curr_individual_results['Sigma'] = Curr_individual_results['Sigma'].fillna(STACK_TH)
+
+        Curr_individual_results = Curr_individual_results.sort_values(by='Sigma', ascending=False)
+
+        Curr_individual_results = Curr_individual_results.reset_index(drop=True)
+
         Name_out = dir_dm + "_STACK_CAND_INDIVIDUAL.csv"
         Curr_individual_results.to_csv(Name_out,index=False)
         if VERBOSITY:
@@ -695,13 +728,14 @@ def stacksearch_results_individual(verbosity_level=0, nharms=16,known_pulsars = 
                 print(Curr_individual_results)
 
 
-def stacksearch_results_DMcross(DM_list=None, verbosity_level=0, fourier_bin = None, numharm=None, Min_threshold = None):
+def stacksearch_results_DMcross(DM_list=None, verbosity_level=0, fourier_bin = None, numharm=None, Min_threshold = None, BIN_FACTOR=None):
         if VERBOSITY:
                print()
                print("STACKSEARCH MULTI-DM SIFTING")
 
         DM_cross_names = {}
         DM_cross_sigmas = {}
+        DM_cross_powers = {}
         DM_cross_periods_ms = {}
         DM_cross_individual_flags = {}
         DM_cross_multi_flags = {}
@@ -724,12 +758,14 @@ def stacksearch_results_DMcross(DM_list=None, verbosity_level=0, fourier_bin = N
 
                 Curr_names = np.array(Curr_result_file.Name).astype("str")
                 Curr_sigmas = np.array(Curr_result_file.Sigma).astype("float")
+                Curr_powers = np.array(Curr_result_file.Power).astype("float")
                 Curr_periods_ms = np.array(Curr_result_file.Period_ms).astype("float")
                 Curr_individual_flags = np.array(Curr_result_file.Code).astype("int")
                 Curr_multi_flags = np.ones(len(Curr_names)) * (-1) # -1 --> to be analysed, 0 --> already analysed
 
                 DM_cross_names[dms] = Curr_names
                 DM_cross_sigmas[dms] = Curr_sigmas
+                DM_cross_powers[dms] = Curr_powers
                 DM_cross_periods_ms[dms] = Curr_periods_ms
                 DM_cross_individual_flags[dms] = Curr_individual_flags
                 DM_cross_multi_flags[dms] = Curr_multi_flags
@@ -737,14 +773,18 @@ def stacksearch_results_DMcross(DM_list=None, verbosity_level=0, fourier_bin = N
 
         Single_candidates_names = []
         Single_candidates_ndms = []
-        Single_candidates_maxdms = []
+        Single_candidates_maxdms_sigma = []
+        Single_candidates_maxdms_power = []
         Single_candidates_sigmas = []
+        Single_candidates_powers = []
         Single_candidates_periods_ms = []
 
         Multi_candidates_names = []
         Multi_candidates_ndms = []
-        Multi_candidates_maxdms = []
+        Multi_candidates_maxdms_sigma = []
+        Multi_candidates_maxdms_power = []
         Multi_candidates_sigmas = []
+        Multi_candidates_powers = []
         Multi_candidates_periods_ms = []
 
         Count_single = 0
@@ -757,6 +797,7 @@ def stacksearch_results_DMcross(DM_list=None, verbosity_level=0, fourier_bin = N
 
                 REF_names = DM_cross_names[REF_dms]
                 REF_sigmas = DM_cross_sigmas[REF_dms]
+                REF_powers = DM_cross_sigmas[REF_dms]
                 REF_periods_ms = DM_cross_periods_ms[REF_dms]
                 REF_individual_flags = DM_cross_individual_flags[REF_dms]
                 REF_multi_flags = DM_cross_multi_flags[REF_dms]
@@ -766,6 +807,8 @@ def stacksearch_results_DMcross(DM_list=None, verbosity_level=0, fourier_bin = N
 
                 for i in range(REF_N_cands):
                        if (REF_multi_flags[i] == -1):
+                                
+                                Count_DM_cand = 0
                               
                                 DM_cross_multi_flags[REF_dms][i] = 0
 
@@ -773,31 +816,22 @@ def stacksearch_results_DMcross(DM_list=None, verbosity_level=0, fourier_bin = N
                                 Plot_names = []
                                 Plot_DMs = []
                                 Plot_sigmas = []
+                                Plot_powers = []
                                 Plot_harms = []
-                                Plot_flag_nan = []
 
                                 # Add the first part of the plot
 
                                 Plot_names.append(REF_names[i])
                                 Plot_DMs.append(REF_DM)
                                 Plot_harms.append("1/1")
-                                if  np.isnan(REF_sigmas[i]):
-                                        print("THERE IS A NAN VALUE HERE, adapating to the minimum threshold...")
-                                        print("Name: ",REF_names[i])
-                                        print("DM: ",REF_DM)
-                                        print("SIGMA: ",REF_sigmas[i])
-                                        print("HARM: 1/1")
-                                        REF_sigmas[i] = Min_threshold
-                                        Plot_flag_nan.append(1)
-                                else:
-                                       Plot_flag_nan.append(0)
-
                                 Plot_sigmas.append(REF_sigmas[i])
+                                Plot_powers.append(REF_powers[i])
                                 
 
                                 for COMP_dms in DM_list:
                                         COMP_names = DM_cross_names[COMP_dms]
                                         COMP_sigmas = DM_cross_sigmas[COMP_dms]
+                                        COMP_powers = DM_cross_powers[COMP_dms]
                                         COMP_periods_ms = DM_cross_periods_ms[COMP_dms]
                                         COMP_individual_flags = DM_cross_individual_flags[COMP_dms]
                                         COMP_multi_flags = DM_cross_multi_flags[COMP_dms]
@@ -806,28 +840,26 @@ def stacksearch_results_DMcross(DM_list=None, verbosity_level=0, fourier_bin = N
 
                                         COMP_DM = float(COMP_dms.replace("DM", "").replace("_","."))
 
+                                        FLAG_DM = 0
+
                                         for j in range(COMP_N_cands):
                                                 if (COMP_multi_flags[j] == -1):
-                                                        Check_flag, Check_harm = check_cross(REF_periods_ms[i],COMP_periods_ms[j],fourier_bin,numharm)
+                                                        Check_flag, Check_harm = check_cross(REF_periods_ms[i],COMP_periods_ms[j],fourier_bin,numharm,BIN_FACTOR)
 
                                                         if Check_flag:
+                                                                FLAG_DM = 1
                                                                 print("The candidate at DM %.2f with period %.5f ms has been removed because it is the %s harmonic of the candidate at DM %.2f with period %.5f ms" % (COMP_DM, COMP_periods_ms[j],Check_harm,REF_DM,REF_periods_ms[i]))
                                                                 DM_cross_multi_flags[COMP_dms][j] = 0
-                                                                if  np.isnan(COMP_sigmas[j]):
-                                                                       print("THERE IS A NAN VALUE HERE, adapating to the minimum threshold...")
-                                                                       print("Name: ",COMP_names[j])
-                                                                       print("DM: ",COMP_DM)
-                                                                       print("SIGMA: ",COMP_sigmas[j])
-                                                                       print("HARM: ",Check_harm)
-                                                                       COMP_sigmas[j] = Min_threshold
-                                                                       COMP_flag_nan[j] = 1
 
 
                                                                 Plot_names.append(COMP_names[j])
                                                                 Plot_DMs.append(COMP_DM)
                                                                 Plot_sigmas.append(COMP_sigmas[j])
+                                                                Plot_powers.append(COMP_powers[j])
                                                                 Plot_harms.append(Check_harm)
-                                                                Plot_flag_nan.append(COMP_flag_nan[j])
+
+                                        Count_DM_cand = Count_DM_cand + FLAG_DM
+
                                 if (len(Plot_names) == 0):
                                        print("ERROR IN THE CANDIDATE PLOT")
                                        exit()
@@ -839,54 +871,89 @@ def stacksearch_results_DMcross(DM_list=None, verbosity_level=0, fourier_bin = N
                                        Single_candidates_names.append(Single_name)
 
                                        Single_dms = Plot_DMs[0]
-                                       Single_candidates_maxdms.append(Single_dms)
+                                       Single_candidates_maxdms_sigma.append(Single_dms)
+                                       Single_candidates_maxdms_power.append(Single_dms)
 
                                        Single_candidates_ndms.append(1)
 
                                        Single_candidates_sigmas.append(Plot_sigmas[0])
+
+                                       Single_candidates_powers.append(Plot_powers[0])
 
                                        Single_candidates_periods_ms.append(REF_periods_ms[i])
 
                                        Count_single = Count_single + 1
 
                                 if (len(Plot_names) > 1):
+
+                                        fig = plt.figure(figsize=(10, 7))
+                                        gs = gridspec.GridSpec(2, 1)
+                                        ax_sigma = plt.subplot(gs[0, 0])
+                                        ax_power = plt.subplot(gs[1, 0])
+
+                                        if (REF_individual_flags[i] == 1):
+                                                ax_sigma.set_title(REF_names[i]+"   P: " + str(REF_periods_ms[i])+" ms")
+                                        else:
+                                                ax_sigma.set_title(str(REF_periods_ms[i])+" ms")
+
+
                                         if (REF_individual_flags[i] == 1):
                                                 Multi_name = REF_names[i]
                                         else:
                                                 Multi_name = "MULTI_" + str(Count_Multi)
                                         Multi_candidates_names.append(Multi_name)
 
-                                        Curr_Multi_ndms = len(Plot_DMs)
-                                        Max_idx = np.argmax(Plot_sigmas)
-                                        Curr_Multi_maxdm = Plot_DMs[Max_idx]
+                                        Curr_Multi_ndms = Count_DM_cand
                                         Multi_candidates_ndms.append(Curr_Multi_ndms)
-                                        Multi_candidates_maxdms.append(Curr_Multi_maxdm)
+                                        print("Candidate %s detected in %d dms and the plot contains %d points." % (Multi_name,Curr_Multi_ndms,len(Plot_sigmas)))
+                                        
+                                        Multi_candidates_periods_ms.append(REF_periods_ms[i])
+
+                                        unique_harms = np.unique(np.array(Plot_harms))
+
+                                        ### Sigma plot
+                                        
+                                        Max_idx_sigma = np.argmax(Plot_sigmas)
+                                        Curr_Multi_maxdm_sigma = Plot_DMs[Max_idx_sigma]
+                                        Multi_candidates_maxdms_sigma.append(Curr_Multi_maxdm_sigma)
 
                                         Multi_maxsigma = np.max(Plot_sigmas)
                                         Multi_candidates_sigmas.append(Multi_maxsigma)
 
-                                        Multi_candidates_periods_ms.append(REF_periods_ms[i])
+                                        markers_sigma = cycle(['o', 's', '^', 'v', 'D', 'p', 'h', 'H', '+', 'x', 'd', '|', '_', '8', '<', '>'])
 
-                                        # PLOT Multi
-                                        plt.figure()
-                                        if (REF_individual_flags[i] == 1):
-                                                plt.title(REF_names[i])
-                                        else:
-                                                plt.title(str(REF_periods_ms[i])+" ms   DM: " + str(Multi_maxsigma))
-                                        
-                                        plt.plot(Plot_DMs[Plot_harms=="1/1"],Plot_sigmas[Plot_harms=="1/1"])
-                                        plt.plot(Plot_DMs[Plot_harms!="1/1"],Plot_sigmas[Plot_harms!="1/1"])
-                                        for w in range(len(Plot_names)):
-                                                if Plot_flag_nan[w] == 1:
-                                                       plt.axvline(Plot_DMs[w],color="red")
-                                                if Plot_harms[w] != "1/1":
-                                                        plt.scatter(Plot_DMs[w],Plot_sigmas[w])
-                                                        # plt.annotate(Plot_harms[w],(Plot_DMs[w], Plot_sigmas[w]),xytext=(5, 5),textcoords='offset points')
+                                        for curr_harms in unique_harms:
+                                                if curr_harms == "1/1":
+                                                       curr_mark = '*'
                                                 else:
-                                                       plt.scatter(Plot_DMs[w],Plot_sigmas[w],marker="*")
+                                                       curr_mark = next(markers_sigma)
+                                                ax_sigma.scatter(Plot_DMs[np.array(Plot_harms)==curr_harms],Plot_sigmas[np.array(Plot_harms)==curr_harms],marker=curr_mark,label=curr_harms)
+                                        ax_sigma.legend()
 
-                                        plt.xlabel("DM [pc cm^-3]")
-                                        plt.ylabel("Sigma")
+                                        ### Power plot
+                                        
+                                        Max_idx_power = np.argmax(Plot_powers)
+                                        Curr_Multi_maxdm_power = Plot_DMs[Max_idx_power]
+                                        Multi_candidates_maxdms_power.append(Curr_Multi_maxdm_power)
+
+                                        Multi_maxpower = np.max(Plot_powers)
+                                        Multi_candidates_powers.append(Multi_maxpower)
+
+                                        markers_power = cycle(['o', 's', '^', 'v', 'D', 'p', 'h', 'H', '+', 'x', 'd', '|', '_', '8', '<', '>'])
+
+                                        for curr_harms in unique_harms:
+                                                if curr_harms == "1/1":
+                                                       curr_mark = '*'
+                                                else:
+                                                       curr_mark = next(markers_power)
+                                                ax_power.scatter(Plot_DMs[np.array(Plot_harms)==curr_harms],Plot_powers[np.array(Plot_harms)==curr_harms],marker=curr_mark,label=curr_harms)
+                                        ax_power.legend()
+
+                                        ax_power.set_xlabel("DM [pc cm^-3]")
+                                        ax_sigma.set_ylabel("Sigma")
+                                        ax_power.set_ylabel("Power")
+                                        plt.setp(ax_sigma.get_xticklabels(), visible=False)
+
                                         Plot_out = "RESULTS_DMCROSS/" + Multi_name
                                         plt.savefig(Plot_out, dpi=300)
                                         plt.close()
@@ -896,14 +963,18 @@ def stacksearch_results_DMcross(DM_list=None, verbosity_level=0, fourier_bin = N
 
         Curr_Multi_results = pd.DataFrame({"Name":Multi_candidates_names,
                                    "Sigma_max":Multi_candidates_sigmas,
+                                   "Power_max":Multi_candidates_powers,
                                    "NDMs":Multi_candidates_ndms,
-                                   "MaxDMs":Multi_candidates_maxdms,
+                                   "MaxDMs_sigma":Multi_candidates_maxdms_sigma,
+                                   "MaxDMs_power":Multi_candidates_maxdms_power,
                                    "Period_ms":Multi_candidates_periods_ms})
         
         Curr_single_results = pd.DataFrame({"Name":Single_candidates_names,
                                    "Sigma_max":Single_candidates_sigmas,
+                                   "Power_max":Single_candidates_powers,
                                    "NDMs":Single_candidates_ndms,
-                                   "MaxDMs":Single_candidates_maxdms,
+                                   "MaxDMs_sigma":Single_candidates_maxdms_sigma,
+                                   "MaxDMs_power":Single_candidates_maxdms_power,
                                    "Period_ms":Single_candidates_periods_ms})
         
         Curr_cross_results = pd.concat([Curr_Multi_results, Curr_single_results], ignore_index=True)
@@ -917,18 +988,13 @@ def stacksearch_results_DMcross(DM_list=None, verbosity_level=0, fourier_bin = N
                 print(Curr_cross_results)
 
 
-def check_cross(REF_period_ms,COMP_period_ms,fourier_bin,numharm):
-
-        ###########################################
-        # ATTENTION!!!! THIS VARIABLE SETS THE GAP FOR COMPARISON
-        N_bins = 1.6
-        ###########################################
+def check_cross(REF_period_ms,COMP_period_ms,fourier_bin,numharm,BIN_FACTOR):
 
         REF_period_s = REF_period_ms / 1000
 
         REF_freq = 1 / REF_period_s
-        REF_freq_low = REF_freq - (N_bins * fourier_bin)
-        REF_freq_high = REF_freq + (N_bins * fourier_bin)
+        REF_freq_low = REF_freq - (BIN_FACTOR * fourier_bin)
+        REF_freq_high = REF_freq + (BIN_FACTOR * fourier_bin)
 
         REF_period_low_s = 1 / REF_freq_high
         REF_period_high_s = 1 / REF_freq_low
@@ -953,7 +1019,7 @@ def check_cross(REF_period_ms,COMP_period_ms,fourier_bin,numharm):
         return False , "ERROR"
 
 
-def remove_harmonics(REF_period_ms, periods_list_ms, REF_flag, Flag_cands, Name_cands, numharm, Curr_num, Curr_den, fourier_bin, known_freq_low, known_freq_high,REF_idx):
+def remove_harmonics(REF_period_ms, periods_list_ms, REF_flag, Flag_cands, Name_cands, numharm, Curr_num, Curr_den, fourier_bin, BIN_FACTOR, known_freq_low, known_freq_high,REF_idx):
         # NEED TO PUT ZEROS ON ALL THE HARMONICS AND IF THE PULSAR IS KNOWN BUT NOT IN THE FUNDAMENTAL HARMONIC IT HAS TO MOVE THE 1 IF IT FINDS A BETTER CANDIDATE
         REF_period_s = REF_period_ms / 1000
         periods_list_s = periods_list_ms / 1000
@@ -962,10 +1028,10 @@ def remove_harmonics(REF_period_ms, periods_list_ms, REF_flag, Flag_cands, Name_
                 REF_period_low_s = 1 / known_freq_high
                 REF_period_high_s = 1 / known_freq_low
         
-        if REF_flag == 2: # Interestin candidate not known
+        if REF_flag == 2: # Interesting candidate not known
                 REF_freq = 1 / REF_period_s
-                REF_freq_low = REF_freq - fourier_bin
-                REF_freq_high = REF_freq + fourier_bin
+                REF_freq_low = REF_freq - (BIN_FACTOR * fourier_bin)
+                REF_freq_high = REF_freq + (BIN_FACTOR * fourier_bin)
 
                 REF_period_low_s = 1 / REF_freq_high
                 REF_period_high_s = 1 / REF_freq_low
@@ -1090,7 +1156,7 @@ def check_if_cand_is_known(P_cand_ms, list_known_pulsars,known_freq_low,known_fr
         print("No match")
         return False, "None", -1, -1, -1
 
-def prepfold_command_from_csv(Results_dir,root_dir,Longest_file):
+def prepfold_command_from_csv(Results_dir,root_dir,Longest_file,n_cpu=None):
         os.chdir(Results_dir)
         Curr_result_file = pd.read_csv("STACK_CAND_DMCROSS.csv")
         Curr_names = np.array(Curr_result_file.Name).astype("str")
@@ -1122,12 +1188,12 @@ def prepfold_command_from_csv(Results_dir,root_dir,Longest_file):
                 if len(maskfile_list) > 0:
                         maskfile = maskfile_list[0]
                         cmd_prep = f"prepfold -p {Cand_p_ms/1000.0} -dm {Cand_DM} {Longest_file} " \
-                                f"-noscales -nooffsets -mask {maskfile} -ncpus 8 -n 128 -noxwin -o {Curr_name}"
+                                f"-noscales -nooffsets -mask {maskfile} -ncpus {str(n_cpu)} -n 128 -noxwin -o {Curr_name}"
                 else:
                         # No maskfile found - run without mask
                         print(f"Warning: No maskfile found for {file_basename}")
                         cmd_prep = f"prepfold -p {Cand_p_ms/1000.0} -dm {Cand_DM} {Longest_file} " \
-                                f"-noscales -nooffsets -ncpus 8 -n 128 -noxwin -o {Curr_name}"
+                                f"-noscales -nooffsets -ncpus {str(n_cpu)} -n 128 -noxwin -o {Curr_name}"
 
                 print("Doing prepfold:")
                 print(cmd_prep)
@@ -1160,19 +1226,22 @@ if __name__ == "__main__":
                       default=0, help="Dispersion measures [pc cm^-3] of coherent de-dispersion.")
     
     parser.add_option("--STACK_THRESH", action="store", dest="STACK_THRESH",
-                      default=8, help="Sigma cut-off of candidates in incoherent stacksearch (Default: 8).")
+                      default=7, help="Sigma cut-off of candidates in incoherent stacksearch (Default: 7).")
     
     parser.add_option("--STACK_MAXCANDS", action="store", dest="STACK_MAXCANDS",
                       default=1000, help="Maximum number of candidates in incoherent stacksearch (Default: 1000).")
     
     parser.add_option("--STACK_NHARMS", action="store", dest="STACK_NHARMS",
-                      default=64, help="Maximum number of harmonics to sum in incoherent stacksearch (Default: 64).")
+                      default=32, help="Maximum number of harmonics to sum in incoherent stacksearch (Default: 32).")
     
     parser.add_option("--KNOWN_PULSARS_FOLDER", action="store", dest="KNOWN_PULSARS_FOLDER",
                       default=None, help="A folder containing the .par files of known pulsars.")
     
     parser.add_option("--NCPUS", action="store", dest="NCPUS",
-                      default=1, help="Number of CPUs used for the computation (Default: 1).")
+                      default=4, help="Number of CPUs used for the computation (Default: 4).")
+    
+    parser.add_option("--BIN_TOLERANCE", action="store", dest="BIN_TOLERANCE",
+                      default=1.6, help="Tolerance in candidates harmonic identification. Default: 1.6, that means checking on an interval of +- 1.5 * fourier bin in Hz.")
     
     parser.add_option("--v", action="store_true", dest="VERBOSITY",
                       default=False, help="Enable verbosity.")
@@ -1193,6 +1262,7 @@ if __name__ == "__main__":
     STACK_THRESH = float(conf.STACK_THRESH)
     STACK_MAXCANDS = int(conf.STACK_MAXCANDS)
     STACK_NHARMS = int(conf.STACK_NHARMS)
+    BIN_TOLERANCE = float(conf.BIN_TOLERANCE)
 
     KNOWN_PULSARS_FOLDER = str(conf.KNOWN_PULSARS_FOLDER)
 
@@ -1333,13 +1403,14 @@ if __name__ == "__main__":
     reference_fourier_bin = 1 / minimum_length_s # Fourier bin of the shortest observation
     list_known_pulsars, list_known_freq_low_lim, list_known_freq_high_lim = import_known_pulsars(KNOWN_PULSARS_FOLDER, reference_mjd, reference_fourier_bin)
 
-    print("PULSAR NAMES AND FREQUENCIES AND PERIODS")
-    for i in range(len(list_known_freq_low_lim)):
-        print(list_known_pulsars[i].psr_name)
-    print(list_known_freq_low_lim)
-    print(list_known_freq_high_lim)
-    print(1/list_known_freq_low_lim)
-    print(1/list_known_freq_high_lim)
+    if VERBOSITY and len(list_known_freq_low_lim) > 0:
+        print("PULSAR NAMES AND FREQUENCIES AND PERIODS")
+        for i in range(len(list_known_freq_low_lim)):
+                print(list_known_pulsars[i].psr_name)
+        print(list_known_freq_low_lim)
+        print(list_known_freq_high_lim)
+        print(1/list_known_freq_low_lim)
+        print(1/list_known_freq_high_lim)
 
     log_filename = "LOG-alex_stack_search_pipeline_%s.txt" % (datetime.datetime.now()).strftime("%Y%m%d_%H%M")
 
@@ -1385,7 +1456,8 @@ if __name__ == "__main__":
                                 reference_nchan,
                                 0,
                                 "",
-                                verbosity_level=int(VERBOSITY))
+                                verbosity_level=int(VERBOSITY),
+                                n_cpu = NCPUS)
             
     TP.close()
     TP.join()
@@ -1476,18 +1548,25 @@ if __name__ == "__main__":
                                 nharms = STACK_NHARMS
                         )
                 
-                stacksearch_results_individual(
-                                verbosity_level=int(VERBOSITY),
-                                nharms = STACK_NHARMS,
-                                known_pulsars = list_known_pulsars,
-                                known_freq_low = list_known_freq_low_lim,
-                                known_freq_high = list_known_freq_high_lim,
-                                dir_dm = dir_dm,
-                                REF_fourier_bin = reference_fourier_bin
-                                )
-                
                 for file in glob.glob("*.fft"):
                         os.remove(file)
+
+                for file in glob.glob("*.dat"):
+                        os.remove(file)
+                
+        stacksearch_results_individual(
+                        verbosity_level=int(VERBOSITY),
+                        nharms = STACK_NHARMS,
+                        known_pulsars = list_known_pulsars,
+                        known_freq_low = list_known_freq_low_lim,
+                        known_freq_high = list_known_freq_high_lim,
+                        dir_dm = dir_dm,
+                        REF_fourier_bin = reference_fourier_bin,
+                        STACK_TH = STACK_THRESH,
+                        BIN_FACTOR = BIN_TOLERANCE
+                        )
+                
+                
 
 
     print()
@@ -1497,11 +1576,11 @@ if __name__ == "__main__":
         
     os.chdir(root_dir)
         
-    stacksearch_results_DMcross(DM_list=list_dm_dir, verbosity_level=int(VERBOSITY), fourier_bin = reference_fourier_bin, numharm=STACK_NHARMS, Min_threshold=STACK_THRESH)
+    stacksearch_results_DMcross(DM_list=list_dm_dir, verbosity_level=int(VERBOSITY), fourier_bin = reference_fourier_bin, numharm=STACK_NHARMS, Min_threshold=STACK_THRESH, BIN_FACTOR = BIN_TOLERANCE)
 
     Results_dir = root_dir + "/RESULTS_DMCROSS/"
 
-    prepfold_command_from_csv(Results_dir,root_dir+"/",longest_file)
+    #prepfold_command_from_csv(Results_dir,root_dir+"/",longest_file)
 
     print("done!"); sys.stdout.flush()
 
