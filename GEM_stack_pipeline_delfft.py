@@ -797,7 +797,7 @@ def stacksearch_results_DMcross(DM_list=None, verbosity_level=0, fourier_bin = N
 
                 REF_names = DM_cross_names[REF_dms]
                 REF_sigmas = DM_cross_sigmas[REF_dms]
-                REF_powers = DM_cross_sigmas[REF_dms]
+                REF_powers = DM_cross_powers[REF_dms]
                 REF_periods_ms = DM_cross_periods_ms[REF_dms]
                 REF_individual_flags = DM_cross_individual_flags[REF_dms]
                 REF_multi_flags = DM_cross_multi_flags[REF_dms]
@@ -909,7 +909,13 @@ def stacksearch_results_DMcross(DM_list=None, verbosity_level=0, fourier_bin = N
                                         
                                         Multi_candidates_periods_ms.append(REF_periods_ms[i])
 
-                                        unique_harms = np.unique(np.array(Plot_harms))
+                                        Plot_harms_np = np.array(Plot_harms)
+                                        Plot_DMs_np = np.array(Plot_DMs)
+                                        Plot_sigmas_np = np.array(Plot_sigmas)
+                                        Plot_powers_np = np.array(Plot_powers)
+
+                                        unique_harms = np.unique(Plot_harms_np)
+
 
                                         ### Sigma plot
                                         
@@ -927,7 +933,7 @@ def stacksearch_results_DMcross(DM_list=None, verbosity_level=0, fourier_bin = N
                                                        curr_mark = '*'
                                                 else:
                                                        curr_mark = next(markers_sigma)
-                                                ax_sigma.scatter(Plot_DMs[np.array(Plot_harms)==curr_harms],Plot_sigmas[np.array(Plot_harms)==curr_harms],marker=curr_mark,label=curr_harms)
+                                                ax_sigma.scatter(Plot_DMs_np[Plot_harms_np==curr_harms],Plot_sigmas_np[Plot_harms_np==curr_harms],marker=curr_mark,label=curr_harms)
                                         ax_sigma.legend()
 
                                         ### Power plot
@@ -946,7 +952,7 @@ def stacksearch_results_DMcross(DM_list=None, verbosity_level=0, fourier_bin = N
                                                        curr_mark = '*'
                                                 else:
                                                        curr_mark = next(markers_power)
-                                                ax_power.scatter(Plot_DMs[np.array(Plot_harms)==curr_harms],Plot_powers[np.array(Plot_harms)==curr_harms],marker=curr_mark,label=curr_harms)
+                                                ax_power.scatter(Plot_DMs_np[Plot_harms_np==curr_harms],Plot_powers_np[Plot_harms_np==curr_harms],marker=curr_mark,label=curr_harms)
                                         ax_power.legend()
 
                                         ax_power.set_xlabel("DM [pc cm^-3]")
@@ -1241,7 +1247,7 @@ if __name__ == "__main__":
                       default=4, help="Number of CPUs used for the computation (Default: 4).")
     
     parser.add_option("--BIN_TOLERANCE", action="store", dest="BIN_TOLERANCE",
-                      default=1.6, help="Tolerance in candidates harmonic identification. Default: 1.6, that means checking on an interval of +- 1.5 * fourier bin in Hz.")
+                      default=1.1, help="Tolerance in candidates harmonic identification. Default: 1.1, that means checking on an interval of +- 1.1 * fourier bin in Hz.")
     
     parser.add_option("--v", action="store_true", dest="VERBOSITY",
                       default=False, help="Enable verbosity.")
@@ -1249,7 +1255,10 @@ if __name__ == "__main__":
     parser.add_option("--enable_stack_different", action="store_true", dest="STACK_DIFF",
                       default=False, help="Enable stacking of observations with different parmeters (Central freq, nchan, bandwidth and time sampling).")
     
-       
+    parser.add_option("--NO_PREPSUBBAND", action="store_false", dest="PREPSUB_FLAG",
+                      default=True, help="Skip prepsubband.")
+    
+
     (conf, args) = parser.parse_args(argv[1:])
 
     # Input parameters
@@ -1263,6 +1272,7 @@ if __name__ == "__main__":
     STACK_MAXCANDS = int(conf.STACK_MAXCANDS)
     STACK_NHARMS = int(conf.STACK_NHARMS)
     BIN_TOLERANCE = float(conf.BIN_TOLERANCE)
+    PREPSUB_FLAG = conf.PREPSUB_FLAG
 
     KNOWN_PULSARS_FOLDER = str(conf.KNOWN_PULSARS_FOLDER)
 
@@ -1444,20 +1454,20 @@ if __name__ == "__main__":
                 print("maskfile not present for ", obs.file_basename)
         
 
-
-        prepsubband(obs.file_abspath,
-                                root_dir,
-                                log_filename,
-                                "full",
-                                "ck00",
-                                N_samples_numout,
-                                maskfile,
-                                list_DDplan_scheme,
-                                reference_nchan,
-                                0,
-                                "",
-                                verbosity_level=int(VERBOSITY),
-                                n_cpu = NCPUS)
+        if PREPSUB_FLAG:
+                prepsubband(obs.file_abspath,
+                                        root_dir,
+                                        log_filename,
+                                        "full",
+                                        "ck00",
+                                        N_samples_numout,
+                                        maskfile,
+                                        list_DDplan_scheme,
+                                        reference_nchan,
+                                        0,
+                                        "",
+                                        verbosity_level=int(VERBOSITY),
+                                        n_cpu = NCPUS)
             
     TP.close()
     TP.join()
