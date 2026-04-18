@@ -617,6 +617,19 @@ def rednoise(fftfile, out_dir, LOG_filename, other_flags="", verbosity_level=0):
                 file_dereddened_ffts.close()
                 # os.rename(fftfile_rednoise_abspath, fftfile_rednoise_abspath.replace("_red.", "."))
 
+
+def realfft_and_rednoise(datfile, workdir_current_dm, log_filename, VERBOSITY):
+    dm_log = log_filename.replace(".log", "_%s.log" % os.path.basename(datfile))  # unique log per file
+    
+    print("Doing realfft on %s..." % datfile); sys.stdout.flush()
+    realfft(datfile, workdir_current_dm, dm_log, "",
+            verbosity_level=int(VERBOSITY), flag_LOG_append=1)
+    
+    fftfile = datfile.replace(".dat", ".fft")
+    print("Doing rednoise on %s..." % fftfile); sys.stdout.flush()
+    rednoise(fftfile, workdir_current_dm, dm_log, "",
+             verbosity_level=int(VERBOSITY))
+
 def stacksearch(fftlist, out_dir, LOG_filename, verbosity_level=0, threshold=8, maxcands=100, nharms=16):
         log_abspath = LOG_filename
         Under_idx = [match.start() for match in re.finditer(r'_', fftlist[0])] # Find all the _ in the first fft file
@@ -1517,30 +1530,18 @@ if __name__ == "__main__":
                         print("WARNING: File %s already present. Skipping realfft, rednoise and stacksearch..." % (Name_stack))
         else:
         
-                for datfile in glob.glob("*DM%s*.dat" % ("%.2f" % dm).replace(".","_")):
+                datfiles = glob.glob("*DM%s*.dat" % ("%.2f" % dm).replace(".", "_"))
 
-                        print("Doing realfft on %s..." % (datfile), end=' '); sys.stdout.flush()
-                        realfft(datfile,
-                                workdir_current_dm,
-                                log_filename,
-                                "",
-                                verbosity_level=int(VERBOSITY),
-                                flag_LOG_append=1
+                # Parallelize realfft+rednoise across .dat files
+                TP2 = ThreadPool(NCPUS)
+                for datfile in datfiles:
+                        TP2.apply_async(
+                        realfft_and_rednoise,
+                        args=(datfile, workdir_current_dm, log_filename, VERBOSITY),
+                        error_callback=handle_error
                         )
-                        print("done!"); sys.stdout.flush()
-
-                        fftfile = datfile.replace(".dat", ".fft")
-
-                        print("Doing rednoise on %s..." % (datfile), end=' '); sys.stdout.flush()
-                        rednoise(fftfile,
-                                workdir_current_dm,
-                                log_filename,
-                                "",
-                                verbosity_level=int(VERBOSITY)
-                        )
-                        print("done!"); sys.stdout.flush()
-                        
-                        print()
+                TP2.close()
+                TP2.join()  # wait for ALL realfft+rednoise to finish before stacksearch
 
                 print("Doing stacksearch on %s..." % (os.getcwd()))
                 Curr_fft_list = []
@@ -1575,9 +1576,6 @@ if __name__ == "__main__":
                         STACK_TH = STACK_THRESH,
                         BIN_FACTOR = BIN_TOLERANCE
                         )
-                
-                
-
 
     print()
     #################################################
